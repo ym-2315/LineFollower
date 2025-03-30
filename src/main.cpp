@@ -45,7 +45,7 @@ public:
             maxRead = max(maxRead, value);
             minRead = min(minRead, value);
         }
-        threshold = (maxRead + minRead + threshold) / 3;
+        threshold = (maxRead + minRead + 2 * threshold) / 4;
     }
 
     void read(const uint8_t n) {
