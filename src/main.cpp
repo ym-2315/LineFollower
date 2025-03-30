@@ -92,7 +92,7 @@ public:
 
 class Motor {
 public:
-    constexpr  uint8_t speedPin, forWordPin, reversePin;
+    const  uint8_t speedPin, forWordPin, reversePin;
 
     Motor(const uint8_t speed, const uint8_t forward, const uint8_t reverse) : speedPin(speed), forWordPin(forward), reversePin(reverse) {
         pinMode(speedPin, OUTPUT);
@@ -139,7 +139,7 @@ void setup() {
     motorA.setSpeed(Speed);
     motorB.setSpeed(Speed);
 
-    for (uint16_t i = 0; i < 40000; i++) {
+    for (uint16_t i = 0; i < 25000; i++) {
         irSensor.calibrate();
         if (i % 512 == 0) {
             digitalWrite(LED_BUILTIN, HIGH);
