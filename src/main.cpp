@@ -20,32 +20,23 @@ typedef enum {
     STOP
 } Direction;
 
-typedef enum {
-    BLANC,
-    LEFT,
-    RIGHT,
-    CENTER,
-    EXTREME_LEFT,
-    EXTREME_RIGHT,
-    END
-} LinePosition;
-
 class Sensor {
 public:
     uint8_t sensorValue;
     uint16_t threshold;
+    uint16_t maxRead = 0;
+    uint16_t minRead = UINT16_MAX;
 
     explicit Sensor(const uint16_t initialThreshold = 250) : sensorValue(0), threshold(initialThreshold) {
     }
 
-    void calibrate() {
+    static void calibrate() {
         uint16_t maxRead = 0, minRead = 1023;
         for (const uint8_t Pin : IRPins) {
             uint16_t value = analogRead(Pin);
             maxRead = max(maxRead, value);
             minRead = min(minRead, value);
         }
-        threshold = (maxRead + minRead + 2 * threshold) / 4;
     }
 
     void read(const uint8_t n) {
@@ -67,26 +58,24 @@ public:
         }
     }
 
-    LinePosition getLinePosition() const {
-        constexpr uint8_t centerMask = 0b00011000;
-        constexpr uint8_t extremeMask = 0b10000001;
-        constexpr uint8_t leftMask = 0b00001110;
-        constexpr uint8_t rightMask = 0b01110000;
+    uint8_t getLinePosition() const {
 
         uint8_t countOnes = 0;
         for (uint8_t i = 0; i < 8; i++) {
             if (sensorValue & (1 << i)) countOnes++;
         }
 
-        if (countOnes >= 6) return END;
-        if (countOnes == 0) return BLANC;
-        if ((sensorValue & centerMask) && !(sensorValue & ~centerMask & ~extremeMask)) return CENTER;
-        if ((sensorValue & leftMask) && (sensorValue & 0b10000000)) return EXTREME_LEFT;
-        if ((sensorValue & rightMask) && (sensorValue & 0b00000001)) return EXTREME_RIGHT;
-        if (sensorValue & leftMask) return LEFT;
-        if (sensorValue & rightMask) return RIGHT;
-
-        return BLANC;
+        switch (countOnes) {
+            case 1:
+                for (uint8_t i = 0; i < 8; i++) {
+                    if (sensorValue == (1 << i)) return (2 * i);
+                }
+            case 2:
+                for (uint8_t i = 0; i < 7; i++) {
+                    if (sensorValue == (3 << i)) return (2 * i + 1);
+                }
+            default: return static_cast<uint8_t>(-1); // Error: two line detected
+        }
     }
 };
 
@@ -122,9 +111,27 @@ public:
     }
 };
 
-constexpr uint16_t Speed = 200;
-constexpr uint8_t LostLineLimit = 100;
-uint16_t lostLineCounter = 0;
+constexpr int8_t Ki = 20;
+constexpr int8_t Kp = 20;
+constexpr int8_t Kd = 0;
+
+constexpr uint8_t TargetPosition = 7;
+constexpr uint8_t Speed = 200;
+constexpr uint8_t MaxSpeed = 255;
+constexpr uint8_t MinSpeed = 150;
+constexpr uint32_t LostLineLimit = 5000;
+constexpr uint32_t CalibrationTime = 10000;
+
+uint32_t lostLineTime = 0;
+uint32_t SpeedControl = 0;
+
+int8_t Error = 0;
+int8_t PreviousError = 0;
+int8_t IntegralError = 0;
+int8_t DerivativeError = 0;
+
+uint8_t MotorASpeed = Speed;
+uint8_t MotorBSpeed = Speed;
 
 Motor motorA(SpeedPinA, ForWordPinA, ReversePinA);
 Motor motorB(SpeedPinB, ForWordPinB, ReversePinB);
@@ -139,14 +146,16 @@ void setup() {
     motorA.setSpeed(Speed);
     motorB.setSpeed(Speed);
 
-    for (uint16_t i = 0; i < 25000; i++) {
-        irSensor.calibrate();
-        if (i % 512 == 0) {
+    const uint64_t StartTime = millis();
+    while (millis() - StartTime < CalibrationTime) {
+        Sensor::calibrate();
+        if (millis() - StartTime % 500 == 0)
             digitalWrite(LED_BUILTIN, HIGH);
-        } else {
+        else
             digitalWrite(LED_BUILTIN, LOW);
-        }
     }
+
+    irSensor.threshold = (irSensor.minRead  + irSensor.maxRead) / 2;
 
     digitalWrite(LED_BUILTIN, LOW);
     Serial.print("Calibrated threshold: ");
@@ -158,42 +167,17 @@ void loop() {
     motorA.setDirection(FORWARD);
     motorB.setDirection(FORWARD);
 
-    switch (irSensor.getLinePosition()) {
-        case END:
-            motorA.setDirection(STOP);
-            motorB.setDirection(STOP);
-            break;
-        case CENTER:
-            motorA.setSpeed(Speed);
-            motorB.setSpeed(Speed);
-            break;
-        case LEFT:
-            motorA.setSpeed(Speed * 0.8);
-            motorB.setSpeed(Speed * 1.1);
-            break;
-        case RIGHT:
-            motorA.setSpeed(Speed * 1.1);
-            motorB.setSpeed(Speed * 0.8);
-            break;
-        case EXTREME_LEFT:
-            motorA.setSpeed(Speed * 0.5);
-            motorB.setSpeed(Speed * 0.5);
-            motorA.setDirection(BACKWARD);
-            motorB.setDirection(FORWARD);
-            break;
-        case EXTREME_RIGHT:
-            motorA.setSpeed(Speed * 0.5);
-            motorB.setSpeed(Speed * 0.5);
-            motorA.setDirection(FORWARD);
-            motorB.setDirection(BACKWARD);
-            break;
-        case BLANC:
-            motorA.setSpeed(Speed * 0.5);
-            motorB.setSpeed(Speed * 0.5);
-            lostLineCounter++;
-            if (lostLineCounter > LostLineLimit) {
-                motorA.setDirection(STOP);
-                motorB.setDirection(STOP);
-            }
-    }
+    Error = static_cast<int8_t>(TargetPosition - irSensor.getLinePosition());
+
+    IntegralError += Error;
+    DerivativeError = Error - PreviousError;
+
+    SpeedControl = Kp * Error + Ki * IntegralError + Kd * DerivativeError;
+    PreviousError = Error;
+
+    MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
+    MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
+
+    motorA.setSpeed(MotorASpeed);
+    motorB.setSpeed(MotorBSpeed);
 }
