@@ -22,14 +22,16 @@ typedef enum {
 
 class Sensor {
 public:
+    //Declaration of Attributes
     uint8_t sensorValue = 0b00000000;
     uint16_t threshold[NumPins] = {512};
     uint16_t maxRead[NumPins] = {0};
     uint16_t minRead[NumPins] = {1023};
 
-    explicit Sensor() : sensorValue(), threshold{}, maxRead{}, minRead{} {}
+    explicit Sensor() = default;
 
     void calibrate(const uint32_t CalibrationTime) {
+
         const uint32_t CalibrationStart = millis();
         while ((millis() - CalibrationStart) < CalibrationTime) {
             for (uint8_t i = 0; i < NumPins; i++) {
