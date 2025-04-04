@@ -5,14 +5,14 @@ constexpr uint8_t NumPins = 8;
 constexpr uint8_t IRPins[NumPins] = {A0, A1, A2, A3, A4, A5, A6, A7};
 
 // Motor A (RIGHT)
-constexpr uint8_t SpeedPinA = PD5;
-constexpr uint8_t ForWordPinA = PD6;
-constexpr uint8_t ReversePinA = PD7;
+constexpr uint8_t SpeedPinA = 5;
+constexpr uint8_t ForWordPinA = 6;
+constexpr uint8_t ReversePinA = 7;
 
 // Motor B (LEFT)
-constexpr uint8_t SpeedPinB = PB2;
-constexpr uint8_t ForWordPinB = PB0;
-constexpr uint8_t ReversePinB = PB1;
+constexpr uint8_t SpeedPinB = 10;
+constexpr uint8_t ForWordPinB = 8;
+constexpr uint8_t ReversePinB = 9;
 
 typedef enum {
     FORWARD,
@@ -22,12 +22,14 @@ typedef enum {
 
 class Sensor {
 public:
+
     uint8_t sensorValue = 0b00000000;
     uint16_t threshold[NumPins] = {512};
     uint16_t maxRead[NumPins] = {0};
     uint16_t minRead[NumPins] = {1023};
+    uint16_t interMatrix = 0b000000000 ;
 
-    explicit Sensor() : sensorValue(), threshold{}, maxRead{}, minRead{} {}
+    explicit Sensor() = default;
 
     void calibrate(const uint32_t CalibrationTime) {
         const uint32_t CalibrationStart = millis();
@@ -40,18 +42,18 @@ public:
         }
 
         for (uint8_t i = 0; i < NumPins; i++) {
-            threshold[i] = (maxRead[i] + minRead[i]) / 2;
+            threshold[i] = (2 * maxRead[i] + minRead[i]) / 3;
         }
 
     }
 
     void read(const uint8_t n) {
-        sensorValue = 0;
+        sensorValue = 0b00000000;
         uint8_t voteCount[NumPins] = {0};
 
         for (uint8_t j = 0; j < n; j++) {
             for (uint8_t i = 0; i < NumPins; i++) {
-                if (analogRead(IRPins[i]) > threshold[i]) {
+                if (static_cast<uint16_t>(analogRead(IRPins[i])) > threshold[i]) {
                     voteCount[i]++;
                 }
             }
@@ -63,6 +65,43 @@ public:
             }
         }
     }
+
+    void update(const uint8_t n) {
+
+
+        if (n > 0) {
+            read(n);
+        } else {
+            for (uint8_t i = 0; i < NumPins; i++) {
+                if (static_cast<uint16_t>(analogRead(IRPins[i])) > threshold[i]) {
+                    sensorValue |= (1 << i);
+                }
+            }
+        }
+
+        bool LastBit = sensorValue & (1 << 0) != 0;
+        uint8_t pos = 1;
+        uint8_t MappedValue = 0b000 | LastBit;
+        for (uint8_t i = 1; i < NumPins; i++) {
+            const bool Bit = (sensorValue & (1 << i)) != 0;
+            if (Bit != LastBit) {
+                MappedValue |= (Bit)? (1 << pos++) : 0b000;
+                LastBit = Bit;
+            }
+            if (pos == 3) break;
+        }
+
+        if (pos == 1) {
+            if (LastBit) MappedValue = 0b111;
+        } else if (pos == 2) {
+            if (LastBit) MappedValue |= 1 << pos;
+        }
+
+        if (MappedValue != (interMatrix & 0b111)) {
+            interMatrix = (interMatrix<<3) | MappedValue;
+        }
+    }
+
 
     uint8_t getLinePosition() const {
 
@@ -117,9 +156,9 @@ public:
     }
 };
 
-constexpr int8_t Ki = 0;
+constexpr int8_t Ki = 5;
 constexpr int8_t Kp = 5;
-constexpr int8_t Kd = 0;
+constexpr int8_t Kd = 5;
 
 constexpr uint8_t TargetPosition = 7;
 constexpr uint8_t Speed = 200;
@@ -170,24 +209,15 @@ void setup() {
 }
 
 void loop() {
-    const uint32_t time = millis();
-    irSensor.read(3);
+    irSensor.update(3);
     motorA.setDirection(FORWARD);
     motorB.setDirection(FORWARD);
-
-    Serial.print("IR: ");
-    Serial.print((uint32_t) irSensor.sensorValue + 0x0100, BIN);
-    Serial.print(" Time (ms): ");
-    Serial.print(millis() - time);
-
-    Serial.print(" Error: ");
-    Serial.print(Error);
 
     const uint8_t pos = irSensor.getLinePosition();
 
     if (pos == 0xFF) {
-        motorA.setDirection(STOP);
-        motorB.setDirection(STOP);
+        motorA.setDirection(FORWARD);
+        motorB.setDirection(FORWARD);
     } else {
         Error = static_cast<int8_t>(TargetPosition - pos);
         IntegralError += Error;
@@ -196,9 +226,6 @@ void loop() {
         SpeedControl = Kp * Error + Ki * IntegralError + Kd * DerivativeError;
         PreviousError = Error;
     }
-
-    Serial.print(" Speed: ");
-    Serial.println(SpeedControl);
 
     MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
     MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
