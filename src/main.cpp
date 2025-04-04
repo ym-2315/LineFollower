@@ -5,20 +5,29 @@ constexpr uint8_t NumPins = 8;
 constexpr uint8_t IRPins[NumPins] = {A0, A1, A2, A3, A4, A5, A6, A7};
 
 // Motor A (RIGHT)
-constexpr uint8_t SpeedPinA = 5;
+constexpr uint8_t SpeedPinA   = 5;
 constexpr uint8_t ForWordPinA = 6;
 constexpr uint8_t ReversePinA = 7;
 
 // Motor B (LEFT)
-constexpr uint8_t SpeedPinB = 10;
-constexpr uint8_t ForWordPinB = 8;
-constexpr uint8_t ReversePinB = 9;
+constexpr uint8_t SpeedPinB   = 10;
+constexpr uint8_t ForWordPinB =  8;
+constexpr uint8_t ReversePinB =  9;
 
 typedef enum {
     FORWARD,
     BACKWARD,
     STOP
 } Direction;
+
+typedef enum {
+    LEFT_TURN     = 0b010110000,
+    RIGHT_TURN    = 0b010011000,
+    LEFT_RIGHT    = 0b010111000,
+    UP_LEFT       = 0b010110010,
+    UP_RIGHT      = 0b010011010,
+    UP_LEFT_RIGHT = 0b010111010,
+} Intersection;
 
 class Sensor {
 public:
@@ -67,8 +76,6 @@ public:
     }
 
     void update(const uint8_t n) {
-
-
         if (n > 0) {
             read(n);
         } else {
@@ -178,9 +185,50 @@ int8_t DerivativeError = 0;
 uint8_t MotorASpeed = Speed;
 uint8_t MotorBSpeed = Speed;
 
+bool ErrorDetected = false;
+
 Motor motorA(SpeedPinA, ForWordPinA, ReversePinA);
 Motor motorB(SpeedPinB, ForWordPinB, ReversePinB);
 Sensor irSensor;
+
+void ForewordPID(const uint8_t pos) {
+    Error = static_cast<int8_t>(TargetPosition - pos);
+    IntegralError += Error;
+    DerivativeError = Error - PreviousError;
+
+    SpeedControl = Kp * Error + Ki * IntegralError + Kd * DerivativeError;
+    PreviousError = Error;
+
+    MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
+    MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
+
+    motorA.setSpeed(MotorASpeed);
+    motorB.setSpeed(MotorBSpeed);
+}
+
+void TurnLeft() {
+    motorA.setSpeed(Speed);
+    motorB.setSpeed(Speed);
+    motorA.setDirection(FORWARD);
+    motorB.setDirection(BACKWARD);
+    delay(20);
+}
+
+void TurnRight() {
+    motorA.setSpeed(Speed);
+    motorB.setSpeed(Speed);
+    motorA.setDirection(BACKWARD);
+    motorB.setDirection(FORWARD);
+    delay(20);
+}
+
+void StopMotor() {
+    motorA.setDirection(BACKWARD);
+    motorB.setDirection(BACKWARD);
+    delay(20);
+    motorA.setDirection(STOP);
+    motorB.setDirection(STOP);
+}
 
 void setup() {
     Serial.begin(9600);
@@ -216,20 +264,21 @@ void loop() {
     const uint8_t pos = irSensor.getLinePosition();
 
     if (pos == 0xFF) {
-        motorA.setDirection(FORWARD);
-        motorB.setDirection(FORWARD);
+        ErrorDetected = true;
     } else {
-        Error = static_cast<int8_t>(TargetPosition - pos);
-        IntegralError += Error;
-        DerivativeError = Error - PreviousError;
-
-        SpeedControl = Kp * Error + Ki * IntegralError + Kd * DerivativeError;
-        PreviousError = Error;
+        if (ErrorDetected) {
+            ErrorDetected = false;
+            switch (irSensor.interMatrix) {
+                case UP_LEFT_RIGHT: ForewordPID(pos); break;
+                case UP_RIGHT: ForewordPID(pos); break;
+                case UP_LEFT: ForewordPID(pos); break;
+                case LEFT_RIGHT: TurnRight(); break;
+                case RIGHT_TURN: TurnRight(); break;
+                case LEFT_TURN: TurnLeft(); break;
+                default: StopMotor();
+            }
+        } else {
+            ForewordPID(pos);
+        }
     }
-
-    MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
-    MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
-
-    motorA.setSpeed(MotorASpeed);
-    motorB.setSpeed(MotorBSpeed);
 }
