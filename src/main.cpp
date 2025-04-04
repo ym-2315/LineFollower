@@ -14,24 +14,27 @@ constexpr uint8_t SpeedPinB = PB2;
 constexpr uint8_t ForWordPinB = PB0;
 constexpr uint8_t ReversePinB = PB1;
 
+//???
 typedef enum {
     FORWARD,
     BACKWARD,
     STOP
 } Direction;
 
+//classes
 class Sensor {
 public:
-    //Declaration of Attributes
+    //Sensor Attributes
     uint8_t sensorValue = 0b00000000;
     uint16_t threshold[NumPins] = {512};
     uint16_t maxRead[NumPins] = {0};
     uint16_t minRead[NumPins] = {1023};
 
+    //Constructor
     explicit Sensor() = default;
 
+    //Sensor Functions
     void calibrate(const uint32_t CalibrationTime) {
-
         const uint32_t CalibrationStart = millis();
         while ((millis() - CalibrationStart) < CalibrationTime) {
             for (uint8_t i = 0; i < NumPins; i++) {
