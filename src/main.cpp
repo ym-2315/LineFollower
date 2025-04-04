@@ -14,8 +14,6 @@ constexpr uint8_t SpeedPinB = 10;
 constexpr uint8_t ForWordPinB = 8;
 constexpr uint8_t ReversePinB = 9;
 
-constexpr uint8_t NumRaws = 5;
-
 typedef enum {
     FORWARD,
     BACKWARD,
@@ -24,13 +22,14 @@ typedef enum {
 
 class Sensor {
 public:
+
     uint8_t sensorValue = 0b00000000;
-    uint8_t previousValue[NumRaws] = {0b00000000};
     uint16_t threshold[NumPins] = {512};
     uint16_t maxRead[NumPins] = {0};
     uint16_t minRead[NumPins] = {1023};
+    uint16_t interMatrix = 0b000000000 ;
 
-    explicit Sensor() : sensorValue(), threshold{}, maxRead{}, minRead{} {}
+    explicit Sensor() = default;
 
     void calibrate(const uint32_t CalibrationTime) {
         const uint32_t CalibrationStart = millis();
@@ -68,6 +67,8 @@ public:
     }
 
     void update(const uint8_t n) {
+
+
         if (n > 0) {
             read(n);
         } else {
@@ -78,13 +79,29 @@ public:
             }
         }
 
-        if (sensorValue != previousValue[0]) {
-            for (uint8_t i = NumRaws-1; i > 0; i--) {
-                previousValue[i] = previousValue[i - 1];
+        bool LastBit = sensorValue & (1 << 0) != 0;
+        uint8_t pos = 1;
+        uint8_t MappedValue = 0b000 | LastBit;
+        for (uint8_t i = 1; i < NumPins; i++) {
+            const bool Bit = (sensorValue & (1 << i)) != 0;
+            if (Bit != LastBit) {
+                MappedValue |= (Bit)? (1 << pos++) : 0b000;
+                LastBit = Bit;
             }
-            previousValue[0] = sensorValue;
+            if (pos == 3) break;
+        }
+
+        if (pos == 1) {
+            if (LastBit) MappedValue = 0b111;
+        } else if (pos == 2) {
+            if (LastBit) MappedValue |= 1 << pos;
+        }
+
+        if (MappedValue != (interMatrix & 0b111)) {
+            interMatrix = (interMatrix<<3) | MappedValue;
         }
     }
+
 
     uint8_t getLinePosition() const {
 
@@ -192,8 +209,7 @@ void setup() {
 }
 
 void loop() {
-    const uint32_t time = millis();
-    irSensor.update(1);
+    irSensor.update(3);
     motorA.setDirection(FORWARD);
     motorB.setDirection(FORWARD);
 
@@ -211,22 +227,9 @@ void loop() {
         PreviousError = Error;
     }
 
-    Serial.print(" Speed: ");
-    Serial.println(SpeedControl);
-
     MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
     MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
 
     motorA.setSpeed(MotorASpeed);
     motorB.setSpeed(MotorBSpeed);
-    const uint32_t end = millis() - time;
-
-    Serial.print("IR: ");
-    Serial.print((uint32_t) irSensor.sensorValue + 0x0100, BIN);
-    Serial.print(" Time (ms): ");
-    Serial.print(end);
-
-    Serial.print(" Error: ");
-    Serial.print(Error);
-
 }
