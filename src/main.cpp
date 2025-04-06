@@ -199,6 +199,7 @@ constexpr uint8_t MinSpeed = 150;
 
 constexpr uint32_t CalibrationTime = 5000;
 
+uint8_t LastPosition = 0;
 int8_t SpeedControl = 0;
 
 int8_t Error = 0;
@@ -211,9 +212,9 @@ uint8_t MotorBSpeed = Speed;
 
 bool ErrorDetected = false;
 
-Motor motorA(SpeedPinA, ForWordPinA, ReversePinA);
-Motor motorB(SpeedPinB, ForWordPinB, ReversePinB);
-Sensor irSensor;
+Motor MotorA(SpeedPinA, ForWordPinA, ReversePinA);
+Motor MotorB(SpeedPinB, ForWordPinB, ReversePinB);
+Sensor IRSensor;
 
 void ForewordPID(const uint8_t pos) {
     Error = static_cast<int8_t>(TargetPosition - pos);
@@ -226,33 +227,33 @@ void ForewordPID(const uint8_t pos) {
     MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
     MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
 
-    motorA.setSpeed(MotorASpeed);
-    motorB.setSpeed(MotorBSpeed);
+    MotorA.setSpeed(MotorASpeed);
+    MotorB.setSpeed(MotorBSpeed);
 }
 
 // need to be calibrated
 void TurnLeft() {
-    motorA.setSpeed(Speed);
-    motorB.setSpeed(Speed);
-    motorA.setDirection(FORWARD);
-    motorB.setDirection(BACKWARD);
+    MotorA.setSpeed(Speed);
+    MotorB.setSpeed(Speed);
+    MotorA.setDirection(FORWARD);
+    MotorB.setDirection(BACKWARD);
     delay(20);
 }
 
 void TurnRight() {
-    motorA.setSpeed(Speed);
-    motorB.setSpeed(Speed);
-    motorA.setDirection(BACKWARD);
-    motorB.setDirection(FORWARD);
+    MotorA.setSpeed(Speed);
+    MotorB.setSpeed(Speed);
+    MotorA.setDirection(BACKWARD);
+    MotorB.setDirection(FORWARD);
     delay(20);
 }
 
 void StopMotor() {
-    motorA.setDirection(BACKWARD);
-    motorB.setDirection(BACKWARD);
+    MotorA.setDirection(BACKWARD);
+    MotorB.setDirection(BACKWARD);
     delay(20);
-    motorA.setDirection(STOP);
-    motorB.setDirection(STOP);
+    MotorA.setDirection(STOP);
+    MotorB.setDirection(STOP);
 }
 
 void setup() {
@@ -263,17 +264,17 @@ void setup() {
         pinMode(IRPin, INPUT);
     }
 
-    motorA.setDirection(STOP);
-    motorB.setDirection(STOP);
-    motorA.setSpeed(Speed);
-    motorB.setSpeed(Speed);
+    MotorA.setDirection(STOP);
+    MotorB.setDirection(STOP);
+    MotorA.setSpeed(Speed);
+    MotorB.setSpeed(Speed);
 
     digitalWrite(LED_BUILTIN, HIGH);
-    irSensor.calibrate(CalibrationTime);
+    IRSensor.calibrate(CalibrationTime);
     digitalWrite(LED_BUILTIN, LOW);
 
     Serial.print("Calibrated threshold: ");
-    for (const uint16_t threshold: irSensor.threshold) {
+    for (const uint16_t threshold: IRSensor.threshold) {
         Serial.print(threshold);
         Serial.print(" ");
     }
@@ -283,21 +284,21 @@ void setup() {
 
 void loop() {
     const uint32_t StartTime = millis();
-    irSensor.update(3);
-    motorA.setDirection(FORWARD);
-    motorB.setDirection(FORWARD);
+    IRSensor.update(3);
+    MotorA.setDirection(FORWARD);
+    MotorB.setDirection(FORWARD);
 
-    const uint8_t pos = irSensor.getLinePosition();
+    const uint8_t pos = IRSensor.getLinePosition();
 
     if (pos == 0xFF) {
         ErrorDetected = true;
     } else {
         if (ErrorDetected) {
             ErrorDetected = false;
-            switch (irSensor.interMatrix) {
-                case UP_LEFT_RIGHT:ForewordPID(pos); break;
-                case UP_RIGHT: ForewordPID(pos); break;
-                case UP_LEFT: ForewordPID(pos); break;
+            switch (IRSensor.interMatrix) {
+                case UP_LEFT_RIGHT:ForewordPID(LastPosition); break;
+                case UP_RIGHT: ForewordPID(LastPosition); break;
+                case UP_LEFT: ForewordPID(LastPosition); break;
                 case LEFT_RIGHT: TurnRight(); break;
                 case RIGHT_TURN: TurnRight(); break;
                 case LEFT_TURN: TurnLeft(); break;
@@ -306,6 +307,7 @@ void loop() {
             ErrorDetected = false;
         } else {
             ForewordPID(pos);
+            LastPosition = pos;
         }
     }
 
