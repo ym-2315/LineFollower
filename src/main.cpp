@@ -86,9 +86,11 @@ public:
             }
         }
 
-        bool LastBit = sensorValue & (1 << 0) != 0;
+        bool LastBit = (sensorValue & (1 << 0)) != 0;
         uint8_t pos = 1;
         uint8_t MappedValue = 0b000 | LastBit;
+        const uint8_t LastMapped =  interMatrix & 0b111;
+
         for (uint8_t i = 1; i < NumPins; i++) {
             const bool Bit = (sensorValue & (1 << i)) != 0;
             if (Bit != LastBit) {
@@ -104,9 +106,31 @@ public:
             if (LastBit) MappedValue |= 1 << pos;
         }
 
-        if (MappedValue != (interMatrix & 0b111)) {
-            interMatrix = (interMatrix<<3) | MappedValue;
+        // Need to verify Logic (it work maybe)
+        if (MappedValue != LastMapped) {
+            if (LastMapped == 0b011)
+            {
+                if (MappedValue & 0b100)
+                    interMatrix |= 0b1111;
+                else
+                    interMatrix = (interMatrix<<3) | MappedValue;
+            } else if (LastMapped == 0b110) {
+                if (MappedValue & 0b001)
+                    interMatrix |= 0b111;
+                else
+                    interMatrix = (interMatrix<<3) | MappedValue;
+            } else if (LastMapped == 0b111) {
+                if (MappedValue & 0b101 != 0)
+                    interMatrix |= MappedValue;
+                else
+                    interMatrix = (interMatrix<<3) | MappedValue;
+            } else {
+                interMatrix = (interMatrix<<3) | MappedValue;
+            }
+
+
         }
+        interMatrix = interMatrix & 0b111111111;
     }
 
 
@@ -206,6 +230,7 @@ void ForewordPID(const uint8_t pos) {
     motorB.setSpeed(MotorBSpeed);
 }
 
+// need to be calibrated
 void TurnLeft() {
     motorA.setSpeed(Speed);
     motorB.setSpeed(Speed);
@@ -257,6 +282,7 @@ void setup() {
 }
 
 void loop() {
+    const uint32_t StartTime = millis();
     irSensor.update(3);
     motorA.setDirection(FORWARD);
     motorB.setDirection(FORWARD);
@@ -269,7 +295,7 @@ void loop() {
         if (ErrorDetected) {
             ErrorDetected = false;
             switch (irSensor.interMatrix) {
-                case UP_LEFT_RIGHT: ForewordPID(pos); break;
+                case UP_LEFT_RIGHT:ForewordPID(pos); break;
                 case UP_RIGHT: ForewordPID(pos); break;
                 case UP_LEFT: ForewordPID(pos); break;
                 case LEFT_RIGHT: TurnRight(); break;
@@ -277,8 +303,14 @@ void loop() {
                 case LEFT_TURN: TurnLeft(); break;
                 default: StopMotor();
             }
+            ErrorDetected = false;
         } else {
             ForewordPID(pos);
         }
     }
+
+    const uint32_t EndTime = millis();
+    Serial.print("Time: ");
+    Serial.print(EndTime - StartTime);
+    Serial.println(" ms");
 }
