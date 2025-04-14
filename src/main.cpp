@@ -150,7 +150,7 @@ public:
                 for (uint8_t i = 0; i < 7; i++) {
                     if (sensorValue == (3 << i)) return (2 * i + 1);
                 }
-            default: return static_cast<uint8_t>(-1); // Error: two line detected
+            default: return 0xFF; // Error: two line detected
         }
     }
 };
