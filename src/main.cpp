@@ -2,17 +2,42 @@
 
 // IR Sensor
 constexpr uint8_t NumPins = 8;
-constexpr uint8_t IRPins[NumPins] = {A0, A1, A2, A3, A4, A5, A6, A7};
+constexpr uint8_t IRPins[NumPins] = {A7, A6, A5, A4, A3, A2, A1, A0};
 
 // Motor A (RIGHT)
-constexpr uint8_t SpeedPinA   = 5;
-constexpr uint8_t ForWordPinA = 6;
-constexpr uint8_t ReversePinA = 7;
+constexpr uint8_t ForWordPinA = 9;
+constexpr uint8_t ReversePinA = 10;
 
 // Motor B (LEFT)
-constexpr uint8_t SpeedPinB   = 10;
-constexpr uint8_t ForWordPinB =  8;
-constexpr uint8_t ReversePinB =  9;
+constexpr uint8_t ForWordPinB =  5;
+constexpr uint8_t ReversePinB =  6;
+
+//PID K's
+constexpr int8_t Ki = 0;
+constexpr int8_t Kp = 10;
+constexpr int8_t Kd = 2;
+
+//Motor regulation
+constexpr uint8_t TargetPosition = 7;
+constexpr uint8_t Speed = 140;
+constexpr uint8_t MaxSpeed = 255;
+constexpr uint8_t MinSpeed = 140;
+
+
+constexpr uint32_t CalibrationTime = 5000;
+
+uint8_t LastPosition = 0;
+int8_t SpeedControl = 0;
+
+int8_t Error = 0;
+int8_t PreviousError = 0;
+int8_t IntegralError = 0;
+int8_t DerivativeError = 0;
+
+uint8_t MotorASpeed = Speed;
+uint8_t MotorBSpeed = Speed;
+
+bool ErrorDetected = false;
 
 typedef enum {
     FORWARD,
@@ -34,17 +59,26 @@ public:
 
     uint8_t sensorValue = 0b00000000;
     uint16_t threshold[NumPins] = {512};
-    uint16_t maxRead[NumPins] = {0};
-    uint16_t minRead[NumPins] = {1023};
     uint16_t interMatrix = 0b000000000 ;
 
-    explicit Sensor() = default;
+    Sensor(){
+      pinMode(LED_BUILTIN, OUTPUT);
 
-    void calibrate(const uint32_t CalibrationTime) {
+      for(const uint8_t IRPin : IRPins) {
+        pinMode(IRPin, INPUT);
+      }
+    }
+
+    void calibrate(const uint32_t CalibrationTime = CalibrationTime) {
+      //This Function calibrate the threshold
+        uint16_t maxRead[NumPins] = {0};
+        uint16_t minRead[NumPins] = {1023};
         const uint32_t CalibrationStart = millis();
+        uint16_t value = 0;
+
         while ((millis() - CalibrationStart) < CalibrationTime) {
             for (uint8_t i = 0; i < NumPins; i++) {
-                uint16_t value = analogRead(IRPins[i]);
+                value = analogRead(IRPins[i]);
                 maxRead[i] = max(maxRead[i], value);
                 minRead[i] = min(minRead[i], value);
             }
@@ -54,10 +88,14 @@ public:
             threshold[i] = (2 * maxRead[i] + minRead[i]) / 3;
         }
 
+        return ;
     }
 
-    void read(const uint8_t n) {
+    void read(const uint8_t n = 3) {
+        //This Function reads the current value of the IRsensor by calculating the mean value among n values
+
         sensorValue = 0b00000000;
+
         uint8_t voteCount[NumPins] = {0};
 
         for (uint8_t j = 0; j < n; j++) {
@@ -73,9 +111,12 @@ public:
                 sensorValue |= (1 << i);
             }
         }
+
+        return ;
     }
 
     void update(const uint8_t n) {
+      //the hell is this
         if (n > 0) {
             read(n);
         } else {
@@ -135,8 +176,9 @@ public:
 
 
     uint8_t getLinePosition() const {
-
+        //This function approximates the position of the line
         uint8_t countOnes = 0;
+
         for (uint8_t i = 0; i < 8; i++) {
             if (sensorValue & (1 << i)) countOnes++;
         }
@@ -150,17 +192,17 @@ public:
                 for (uint8_t i = 0; i < 7; i++) {
                     if (sensorValue == (3 << i)) return (2 * i + 1);
                 }
-            default: return 0xFF; // Error: two line detected
+            default: return 7; // Error: two line detected
         }
     }
 };
 
 class Motor {
 public:
-    const uint8_t speedPin, forWordPin, reversePin;
+    const uint8_t forWordPin, reversePin;
+    uint8_t speed = 0;
 
-    Motor(const uint8_t speed, const uint8_t forward, const uint8_t reverse) : speedPin(speed), forWordPin(forward), reversePin(reverse) {
-        pinMode(speedPin, OUTPUT);
+    Motor(const uint8_t forward, const uint8_t reverse) : forWordPin(forward), reversePin(reverse) {
         pinMode(forWordPin, OUTPUT);
         pinMode(reversePin, OUTPUT);
     }
@@ -168,52 +210,38 @@ public:
     void setDirection(const Direction dir) const {
         switch (dir) {
             case FORWARD:
-                digitalWrite(forWordPin, HIGH);
-                digitalWrite(reversePin, LOW);
+                analogWrite(forWordPin, speed);
+                analogWrite(reversePin, 0);
                 break;
             case BACKWARD:
-                digitalWrite(forWordPin, LOW);
-                digitalWrite(reversePin, HIGH);
+                analogWrite(forWordPin, 0);
+                analogWrite(reversePin, speed);
                 break;
             case STOP:
-                digitalWrite(forWordPin, LOW);
-                digitalWrite(reversePin, LOW);
+                analogWrite(forWordPin, LOW);
+                analogWrite(reversePin, LOW);
                 break;
+            default:
+              break;
         }
+        return;
     }
 
-    void setSpeed(const uint8_t speed) const {
-        analogWrite(speedPin, speed);
+    void setSpeed(const uint8_t v) {
+        speed = v;
+        return ;
     }
 };
 
-constexpr int8_t Ki = 5;
-constexpr int8_t Kp = 5;
-constexpr int8_t Kd = 5;
-
-constexpr uint8_t TargetPosition = 7;
-constexpr uint8_t Speed = 200;
-constexpr uint8_t MaxSpeed = 255;
-constexpr uint8_t MinSpeed = 150;
+/*
+class PID {
+  public:
+    explicit PID() = default;
+}*/
 
 
-constexpr uint32_t CalibrationTime = 5000;
-
-uint8_t LastPosition = 0;
-int8_t SpeedControl = 0;
-
-int8_t Error = 0;
-int8_t PreviousError = 0;
-int8_t IntegralError = 0;
-int8_t DerivativeError = 0;
-
-uint8_t MotorASpeed = Speed;
-uint8_t MotorBSpeed = Speed;
-
-bool ErrorDetected = false;
-
-Motor MotorA(SpeedPinA, ForWordPinA, ReversePinA);
-Motor MotorB(SpeedPinB, ForWordPinB, ReversePinB);
+Motor MotorA( ForWordPinA, ReversePinA);
+Motor MotorB(ForWordPinB, ReversePinB);
 Sensor IRSensor;
 
 void ForewordPID(const uint8_t pos) {
@@ -224,8 +252,8 @@ void ForewordPID(const uint8_t pos) {
     SpeedControl = Kp * Error + Ki * IntegralError + Kd * DerivativeError;
     PreviousError = Error;
 
-    MotorASpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
-    MotorBSpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
+    MotorASpeed = constrain(Speed - SpeedControl, MinSpeed, MaxSpeed);
+    MotorBSpeed = constrain(Speed + SpeedControl, MinSpeed, MaxSpeed);
 
     MotorA.setSpeed(MotorASpeed);
     MotorB.setSpeed(MotorBSpeed);
@@ -258,39 +286,42 @@ void StopMotor() {
 
 void setup() {
     Serial.begin(9600);
-    pinMode(LED_BUILTIN, OUTPUT);
 
-    for(const uint8_t IRPin : IRPins) {
-        pinMode(IRPin, INPUT);
-    }
 
     MotorA.setDirection(STOP);
     MotorB.setDirection(STOP);
-    MotorA.setSpeed(Speed);
-    MotorB.setSpeed(Speed);
+    //MotorA.setSpeed(Speed);
+    //MotorB.setSpeed(Speed);
 
+    //Calibration
     digitalWrite(LED_BUILTIN, HIGH);
-    IRSensor.calibrate(CalibrationTime);
+    IRSensor.calibrate();
     digitalWrite(LED_BUILTIN, LOW);
 
+    MotorA.setDirection(FORWARD);
+    MotorB.setDirection(FORWARD);
+
+
+    /*
     Serial.print("Calibrated threshold: ");
     for (const uint16_t threshold: IRSensor.threshold) {
         Serial.print(threshold);
         Serial.print(" ");
     }
     Serial.println("");
+    delay(1000);
+    */
 
 }
 
 void loop() {
-    const uint32_t StartTime = millis();
-    IRSensor.update(3);
-    MotorA.setDirection(FORWARD);
-    MotorB.setDirection(FORWARD);
-
+    //const uint32_t StartTime = millis();
+    IRSensor.read();
     const uint8_t pos = IRSensor.getLinePosition();
+    //Serial.println(pos);
+    //Serial.println(0x100+IRSensor.sensorValue, BIN);
 
-    if (pos == 0xFF) {
+    /*if (pos == 0xFF) {
         ErrorDetected = true;
     } else {
         if (ErrorDetected) {
@@ -311,8 +342,10 @@ void loop() {
         }
     }
 
-    const uint32_t EndTime = millis();
-    Serial.print("Time: ");
-    Serial.print(EndTime - StartTime);
-    Serial.println(" ms");
+  Serial.println(0x100 + IRSensor.sensorValue, BIN);
+  */
+    //if (pos != 0xFF)
+    ForewordPID(pos);
+    analogWrite(9,250);
+
 }
